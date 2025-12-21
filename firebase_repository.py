@@ -21,6 +21,15 @@ class FirebaseRepository(DatabaseInterface):
 
     def update_user(self, uid, data):
         db.reference(f"users/{uid}").update(data)
+        
+    # Inside FirebaseRepository class
+
+    def get_user_groups(self, uid):
+        user = self.get_user(uid)
+        return user.get("groupIds", []) if user else []
+
+    def get_user_by_email_key(self, email_key):
+        return db.reference(f"usersAsEmailKey/{email_key}").get()        
 
     # --- GROUP LOGIC ---
     def create_group(self, data):
