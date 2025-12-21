@@ -63,52 +63,47 @@ class FirebaseRepository(DatabaseInterface):
     # --- ITEM LOGIC ---
     def create_item_atomically(self, item_data):
         try:
-            # 1. Generate the unique ID for the item first
+            # 1. Generate unique ID
             item_ref = db.reference("items").push()
             item_id = item_ref.key
             item_data["itemId"] = item_id
-            
-            # 🔥 DENORMALIZATION: Add payer name
-            payer_id = item_data["itemPayer"][0]
-            payer_user = self.get_user(payer_id)
-            item_data["payerName"] = payer_user.get("name", "Unknown") if payer_user else "Unknown"
 
             group_id = item_data["itemGroupId"]
             group_ref = db.reference(f"groups/{group_id}")
 
             def create_transaction(current_group):
-                if current_group is None:
-                    return None # This will trigger the 404 in app.py
+                if current_group is None: return None
                 
-                # Ensure structure exists
-                current_group.setdefault("groupItems", [])
-                current_group.setdefault("groupGraph", {})
-                current_group.setdefault("groupMembers", [])
+                # Fetch the denormalized name map from the group
+                name_map = current_group.get("memberNames", {})
                 
-                # Add item to group history
-                current_group["groupItems"].append(item_id)
+                # 🔥 DENORMALIZE PAYER NAMES
+                payer_ids = item_data.get("itemPayer", [])
+                item_data["itemPayerNames"] = [name_map.get(uid, "Unknown") for uid in payer_ids]
                 
-                # Run math
+                # 🔥 DENORMALIZE SPLITTER NAMES
+                splitter_ids = item_data.get("itemSpliter", [])
+                item_data["itemSpliterNames"] = [name_map.get(uid, "Unknown") for uid in splitter_ids]
+
+                # Standard logic: Add to history
+                current_group.setdefault("groupItems", []).append(item_id)
+                
+                # Update split graph math
                 from split_logic import update_group_graph
-                p_id = item_data["itemPayer"][0]
-                splitters = item_data.get("itemSpliter", [])
+                p_id = payer_ids[0]
                 values = item_data.get("itemSpliterValue", [])
-                
-                for i in range(len(splitters)):
-                    update_group_graph(current_group, p_id, splitters[i], values[i])
+                for i in range(len(splitter_ids)):
+                    update_group_graph(current_group, p_id, splitter_ids[i], values[i])
                 
                 return current_group
 
-            # Execute Atomic Transaction
             group_ref.transaction(create_transaction)
             
-            # 2. Only if transaction succeeds, save the actual item record
+            # Save the fully denormalized item
             db.reference(f"items/{item_id}").set(item_data)
             return True, "item created"
 
         except Exception as e:
-            print(f"❌ ATOMIC CREATE ERROR: {str(e)}")
-            traceback.print_exc()
             return False, str(e)
 
     def delete_item_atomically(self, item_id):
