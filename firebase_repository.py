@@ -1,6 +1,7 @@
 from firebase_admin import db
 from database_interface import DatabaseInterface
 from split_logic import update_group_graph
+import traceback
 class FirebaseRepository(DatabaseInterface):
     # --- USER LOGIC ---
     def create_user(self, uid, data):
@@ -61,24 +62,54 @@ class FirebaseRepository(DatabaseInterface):
 
     # --- ITEM LOGIC ---
     def create_item_atomically(self, item_data):
-        group_id = item_data["itemGroupId"]
-        group_ref = db.reference(f"groups/{group_id}")
+        try:
+            # 1. Generate the unique ID for the item first
+            item_ref = db.reference("items").push()
+            item_id = item_ref.key
+            item_data["itemId"] = item_id
+            
+            # 🔥 DENORMALIZATION: Add payer name
+            payer_id = item_data["itemPayer"][0]
+            payer_user = self.get_user(payer_id)
+            item_data["payerName"] = payer_user.get("name", "Unknown") if payer_user else "Unknown"
 
-        def create_transaction(current_data):
-            if current_data is None: return None
-            
-            # Add to items history
-            current_data.setdefault("groupItems", []).append(item_data["itemId"])
-            
-            # Update math
-            p_id = item_data["itemPayer"][0]
-            for i, r_id in enumerate(item_data["itemSpliter"]):
-                update_group_graph(current_data, p_id, r_id, item_data["itemSpliterValue"][i])
-            
-            return current_data
+            group_id = item_data["itemGroupId"]
+            group_ref = db.reference(f"groups/{group_id}")
 
-        group_ref.transaction(create_transaction)
-        db.reference(f"items/{item_data['itemId']}").set(item_data)
+            def create_transaction(current_group):
+                if current_group is None:
+                    return None # This will trigger the 404 in app.py
+                
+                # Ensure structure exists
+                current_group.setdefault("groupItems", [])
+                current_group.setdefault("groupGraph", {})
+                current_group.setdefault("groupMembers", [])
+                
+                # Add item to group history
+                current_group["groupItems"].append(item_id)
+                
+                # Run math
+                from split_logic import update_group_graph
+                p_id = item_data["itemPayer"][0]
+                splitters = item_data.get("itemSpliter", [])
+                values = item_data.get("itemSpliterValue", [])
+                
+                for i in range(len(splitters)):
+                    update_group_graph(current_group, p_id, splitters[i], values[i])
+                
+                return current_group
+
+            # Execute Atomic Transaction
+            group_ref.transaction(create_transaction)
+            
+            # 2. Only if transaction succeeds, save the actual item record
+            db.reference(f"items/{item_id}").set(item_data)
+            return True, "item created"
+
+        except Exception as e:
+            print(f"❌ ATOMIC CREATE ERROR: {str(e)}")
+            traceback.print_exc()
+            return False, str(e)
 
     def delete_item_atomically(self, item_id):
         # 1. We must get the item data first to know what to reverse

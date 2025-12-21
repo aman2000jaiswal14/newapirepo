@@ -11,7 +11,7 @@ import traceback,os
 # Initialize
 cred_path = os.path.join("/etc/secrets/", "firebase.json") # production
 # cred_path = os.path.join(os.path.dirname(file), "firebase.json") # development
-# cred_path = os.path.join("C:\\Users\\aman2\\Desktop\\Payplit\\host\\apirepo", "firebase.json") # development
+# cred_path = os.path.join("C:\\Users\\aman2\\Desktop\\Payplit", "firebase.json") # development
 cred = credentials.Certificate(cred_path)
 firebase_admin.initialize_app(cred, {"databaseURL": "https://myproject-b3962-default-rtdb.firebaseio.com/"})
 
