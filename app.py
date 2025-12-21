@@ -203,14 +203,23 @@ def get_paginated_items():
         return jsonify([]), 500
 
 @app.route("/v1/items", methods=["DELETE"])
-def delete_item():
+def delete_item_v1():
     try:
-        iid = request.args.get("itemId")
-        # Logic to reverse graph should be here (optional for MVP)
-        repo.delete_item(iid)
-        return safe_res("success", "Deleted")
-    except:
-        return safe_res("error", "Fail", code=500)
+        # Get itemId from query params (matches your Android call)
+        item_id = request.args.get("itemId")
+        if not item_id:
+            return safe_res("error", "itemId missing", code=400)
+
+        # Delegate everything to the repository
+        success, message = repo.delete_item_and_update_graph(item_id)
+        
+        if success:
+            return safe_res("success", message)
+        else:
+            return safe_res("error", message, code=404)
+
+    except Exception:
+        return safe_res("error", "Delete failed", {"trace": traceback.format_exc()}, code=500)
 
 
 # ================================
