@@ -178,16 +178,15 @@ def get_members_detail():
 def add_item():
     try:
         data = request.get_json(force=True)
-        item = repo.create_item(data)
-        group = repo.get_group(item["itemGroupId"])
-        if group:
-            group.setdefault("groupItems", []).append(item["itemId"])
-            p_id = item["itemPayer"][0]
-            for i, r_id in enumerate(item["itemSpliter"]):
-                update_group_graph(group, p_id, r_id, item["itemSpliterValue"][i])
-            repo.update_group(item["itemGroupId"], group)
+        
+        # 🔥 INDUSTRY FIX: Logic moved inside repo.transaction
+        # No more manual loops here. 
+        success, msg = repo.create_item_atomically(data)
+        
+        if success:
             return "item created", 201
-        return "Group not found", 404
+        else:
+            return msg, 400
     except:
         return "Error", 500
 
@@ -205,23 +204,20 @@ def get_paginated_items():
 @app.route("/v1/items", methods=["DELETE"])
 def delete_item_v1():
     try:
-        # Get itemId from query params (matches your Android call)
         item_id = request.args.get("itemId")
         if not item_id:
             return safe_res("error", "itemId missing", code=400)
 
-        # Delegate everything to the repository
-        success, message = repo.delete_item_and_update_graph(item_id)
+        # 🔥 INDUSTRY FIX: Calls the atomic reversal logic
+        success, message = repo.delete_item_atomically(item_id)
         
         if success:
             return safe_res("success", message)
         else:
             return safe_res("error", message, code=404)
-
-    except Exception:
-        return safe_res("error", "Delete failed", {"trace": traceback.format_exc()}, code=500)
-
-
+    except:
+        return safe_res("error", "Delete failed", code=500)
+    
 # ================================
 # 📊 SETTLEMENTS SECTION
 # ================================
