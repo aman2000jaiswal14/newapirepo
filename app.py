@@ -6,14 +6,22 @@ from split_logic import update_group_graph
 import traceback,os
 
 
-
-
+prod = 1
+cred_path = ""
 # Initialize
-cred_path = os.path.join("/etc/secrets/", "firebase.json") # production
+if(prod ==1):
+    cred_path = os.path.join("/etc/secrets/", "firebase.json") # production
+else:
+    cred_path = os.path.join("C:\\Users\\aman2\\Desktop\\Payplit", "firebase.json") # development
+
 # cred_path = os.path.join(os.path.dirname(file), "firebase.json") # development
 # cred_path = os.path.join("C:\\Users\\aman2\\Desktop\\Payplit", "firebase.json") # development
 cred = credentials.Certificate(cred_path)
-firebase_admin.initialize_app(cred, {"databaseURL": "https://myproject-b3962-default-rtdb.firebaseio.com/"})
+if(prod ==1):
+    firebase_admin.initialize_app(cred, {"databaseURL": "https://myproject-b3962-default-rtdb.firebaseio.com/"})
+else:
+    firebase_admin.initialize_app(cred, {"databaseURL": "https://kotlinfirebase-95de4-default-rtdb.firebaseio.com/"})
+
 
 app = Flask(__name__)
 repo = FirebaseRepository()
@@ -217,6 +225,26 @@ def delete_item_v1():
             return safe_res("error", message, code=404)
     except:
         return safe_res("error", "Delete failed", code=500)
+    
+# ================================
+# 💸 ITEMS SECTION (Add this missing route)
+# ================================
+
+@app.route("/v1/items/<itemId>", methods=["GET"])
+def get_item_by_id(itemId):
+    """
+    🔥 FIXED: Fetches single item detail.
+    Matches Android GET call for Screen.ItemDetail
+    """
+    try:
+        item = repo.get_item(itemId)
+        if item:
+            # We wrap it in {"item": item} to match the SingleItemDto on Android
+            return safe_res("success", "Item fetched", {"item": item})
+        else:
+            return safe_res("error", "Item not found", code=404)
+    except Exception:
+        return safe_res("error", "Internal Server Error", code=500)
     
 # ================================
 # 📊 SETTLEMENTS SECTION
