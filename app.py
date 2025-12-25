@@ -2,12 +2,11 @@ import firebase_admin
 from firebase_admin import credentials, auth, db
 from flask import Flask, request, jsonify
 from firebase_repository import FirebaseRepository
-from split_logic import update_group_graph
 import traceback,os
 
 
 
-prod = 1
+prod = 0
 cred_path = ""
 # Initialize
 if(prod ==1):

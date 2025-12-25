@@ -1,6 +1,7 @@
 from firebase_admin import db
 from database_interface import DatabaseInterface
-from split_logic import update_group_graph
+from split_logic import update_group_balances
+from split_logic import optimal_account_balance
 import traceback
 class FirebaseRepository(DatabaseInterface):
     # --- USER LOGIC ---
