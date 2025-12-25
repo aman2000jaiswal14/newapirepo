@@ -24,7 +24,7 @@ class FirebaseRepository(DatabaseInterface):
     def update_user(self, uid, data):
         db.reference(f"users/{uid}").update(data)
         
-    # Inside FirebaseRepository class
+    # Inside FirebaseRepository class   
 
     def get_user_groups(self, uid):
         user = self.get_user(uid)
@@ -62,6 +62,7 @@ class FirebaseRepository(DatabaseInterface):
         db.reference(f"groups/{group_id}").delete()
 
     # --- ITEM LOGIC ---
+
     def create_item_atomically(self, item_data):
         try:
             item_ref = db.reference("items").push()
@@ -80,18 +81,17 @@ class FirebaseRepository(DatabaseInterface):
                 item_data["itemSpliterNames"] = [name_map.get(uid, "Unknown") for uid in item_data.get("itemSpliter", [])]
                 current_group.setdefault("groupItems", []).append(item_id)
 
-                # 2. 🔥 NEW GRAPH LOGIC
-                from split_logic import update_group_balances, rebuild_simplified_graph
+                # 2. 🔥 UPDATED GRAPH LOGIC
                 payer_id = item_data["itemPayer"][0]
                 splitters = item_data["itemSpliter"]
                 values = item_data["itemSpliterValue"]
 
-                for i in range(len(splitters)):
-                    # Update the 'groupBalance' ledger
-                    update_group_balances(current_group, payer_id, splitters[i], values[i])
+                for k in range(len(splitters)):
+                    # Step A: Update the ledger
+                    update_group_balances(current_group, payer_id, splitters[k], values[k])
                 
-                # Rebuild the simplified graph from the updated ledger
-                rebuild_simplified_graph(current_group)
+                # Step B: Rebuild simplified instructions
+                optimal_account_balance(current_group)
                 
                 return current_group
 
@@ -100,8 +100,7 @@ class FirebaseRepository(DatabaseInterface):
             return True, "item created"
         except Exception as e:
             return False, str(e)
-        
-        
+
     def delete_item_atomically(self, item_id):
         item_data = db.reference(f"items/{item_id}").get()
         if not item_data: return False, "Not found"
@@ -112,22 +111,22 @@ class FirebaseRepository(DatabaseInterface):
         def delete_transaction(current_group):
             if current_group is None: return None
             
-            # 1. Remove from history
+            # Remove from history
             if "groupItems" in current_group:
                 current_group["groupItems"] = [i for i in current_group["groupItems"] if i != item_id]
 
-            # 2. 🔥 REVERSE GRAPH LOGIC
-            from split_logic import update_group_balances, rebuild_simplified_graph
+            # 🔥 REVERSE THE LEDGER
             payer_id = item_data["itemPayer"][0]
             splitters = item_data["itemSpliter"]
             values = item_data["itemSpliterValue"]
 
-            for i in range(len(splitters)):
-                # Use is_reversal=True to move money back
-                update_group_balances(current_group, payer_id, splitters[i], values[i], is_reversal=True)
+            for k in range(len(splitters)):
+                # To reverse, we add the negative of the original split value
+                reverse_amt = -float(values[k])
+                update_group_balances(current_group, payer_id, splitters[k], reverse_amt)
             
-            # Re-simplify after removing the amount
-            rebuild_simplified_graph(current_group)
+            # Rebuild simplified instructions for remaining balances
+            optimal_account_balance(current_group)
             
             return current_group
 
@@ -137,6 +136,7 @@ class FirebaseRepository(DatabaseInterface):
             return True, "Deleted"
         except Exception as e:
             return False, str(e)
+        
         
     def create_item(self, data):
         # 🔥 DENORMALIZATION
