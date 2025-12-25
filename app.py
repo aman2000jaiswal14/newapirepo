@@ -6,7 +6,7 @@ import traceback,os
 
 
 
-prod = 0
+prod = 1
 cred_path = ""
 # Initialize
 if(prod ==1):
