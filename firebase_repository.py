@@ -63,7 +63,6 @@ class FirebaseRepository(DatabaseInterface):
     # --- ITEM LOGIC ---
     def create_item_atomically(self, item_data):
         try:
-            # 1. Generate unique ID
             item_ref = db.reference("items").push()
             item_id = item_ref.key
             item_data["itemId"] = item_id
@@ -74,62 +73,62 @@ class FirebaseRepository(DatabaseInterface):
             def create_transaction(current_group):
                 if current_group is None: return None
                 
-                # Fetch the denormalized name map from the group
+                # 1. Standard Denormalization
                 name_map = current_group.get("memberNames", {})
-                
-                # 🔥 DENORMALIZE PAYER NAMES
-                payer_ids = item_data.get("itemPayer", [])
-                item_data["itemPayerNames"] = [name_map.get(uid, "Unknown") for uid in payer_ids]
-                
-                # 🔥 DENORMALIZE SPLITTER NAMES
-                splitter_ids = item_data.get("itemSpliter", [])
-                item_data["itemSpliterNames"] = [name_map.get(uid, "Unknown") for uid in splitter_ids]
-
-                # Standard logic: Add to history
+                item_data["itemPayerNames"] = [name_map.get(uid, "Unknown") for uid in item_data.get("itemPayer", [])]
+                item_data["itemSpliterNames"] = [name_map.get(uid, "Unknown") for uid in item_data.get("itemSpliter", [])]
                 current_group.setdefault("groupItems", []).append(item_id)
+
+                # 2. 🔥 NEW GRAPH LOGIC
+                from split_logic import update_group_balances, rebuild_simplified_graph
+                payer_id = item_data["itemPayer"][0]
+                splitters = item_data["itemSpliter"]
+                values = item_data["itemSpliterValue"]
+
+                for i in range(len(splitters)):
+                    # Update the 'groupBalance' ledger
+                    update_group_balances(current_group, payer_id, splitters[i], values[i])
                 
-                # Update split graph math
-                from split_logic import update_group_graph
-                p_id = payer_ids[0]
-                values = item_data.get("itemSpliterValue", [])
-                for i in range(len(splitter_ids)):
-                    update_group_graph(current_group, p_id, splitter_ids[i], values[i])
+                # Rebuild the simplified graph from the updated ledger
+                rebuild_simplified_graph(current_group)
                 
                 return current_group
 
             group_ref.transaction(create_transaction)
-            
-            # Save the fully denormalized item
             db.reference(f"items/{item_id}").set(item_data)
             return True, "item created"
-
         except Exception as e:
             return False, str(e)
-
+        
+        
     def delete_item_atomically(self, item_id):
-        # 1. We must get the item data first to know what to reverse
         item_data = db.reference(f"items/{item_id}").get()
         if not item_data: return False, "Not found"
 
         group_id = item_data["itemGroupId"]
         group_ref = db.reference(f"groups/{group_id}")
 
-        def delete_transaction(current_data):
-            if current_data is None: return None
+        def delete_transaction(current_group):
+            if current_group is None: return None
             
-            # Remove from items history
-            if "groupItems" in current_data:
-                current_data["groupItems"] = [i for i in current_data["groupItems"] if i != item_id]
+            # 1. Remove from history
+            if "groupItems" in current_group:
+                current_group["groupItems"] = [i for i in current_group["groupItems"] if i != item_id]
 
-            # 🔥 REVERSE THE MATH
-            # To delete: Payer becomes Receiver, Splitter becomes Payer
+            # 2. 🔥 REVERSE GRAPH LOGIC
+            from split_logic import update_group_balances, rebuild_simplified_graph
             payer_id = item_data["itemPayer"][0]
-            for i, splitter_id in enumerate(item_data["itemSpliter"]):
-                amount = item_data["itemSpliterValue"][i]
-                # Notice the IDs are swapped: splitter_id is now the 'payer'
-                update_group_graph(current_data, splitter_id, payer_id, amount)
+            splitters = item_data["itemSpliter"]
+            values = item_data["itemSpliterValue"]
+
+            for i in range(len(splitters)):
+                # Use is_reversal=True to move money back
+                update_group_balances(current_group, payer_id, splitters[i], values[i], is_reversal=True)
             
-            return current_data
+            # Re-simplify after removing the amount
+            rebuild_simplified_graph(current_group)
+            
+            return current_group
 
         try:
             group_ref.transaction(delete_transaction)
